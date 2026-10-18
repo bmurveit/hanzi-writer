@@ -1,0 +1,1304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hanzi Writer Practice</title>
+<style>
+  :root {
+    --bg: #faf7f2; --ink: #222; --muted: #777; --grid: #d9a3a3;
+    --accent: #2f7d4f; --wrong: #c0392b; --card: #fff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 24px 16px;
+  }
+  h1 { font-size: 1.2rem; font-weight: 600; margin: 0 0 12px; }
+
+  /* Top line: level badge, word count, fully-known list button. */
+  .topbar { display: flex; gap: 12px; align-items: center; margin-bottom: 8px;
+            color: var(--muted); font-size: .9rem; }
+  .badge { padding: 2px 10px; border-radius: 999px; font-size: .8rem; font-weight: 600;
+           color: #fff; background: #999; }
+  .badge.lv0 { background: #c0392b; }   /* New */
+  .badge.lv1 { background: #d68910; }   /* Kind of known */
+  .badge.lv2 { background: var(--accent); }   /* Known */
+
+  /* What to write (English for Known words, instructions otherwise). */
+  .prompt { min-height: 1.6em; font-size: 1.15rem; text-align: center; }
+
+  /* The row of squares, one per character, like a line on the practice sheet. */
+  .row { display: flex; gap: 8px; justify-content: center; }
+
+  /* One practice square: a red "rice grid" like your practice sheet.
+     Its width and height are set from JavaScript to fit the word. */
+  .cell {
+    background: var(--card);
+    border: 2px solid var(--grid);
+    background-image:
+      linear-gradient(var(--grid), var(--grid)),
+      linear-gradient(var(--grid), var(--grid)),
+      linear-gradient(to top right, transparent calc(50% - 0.5px), #eed3d3 50%, transparent calc(50% + 0.5px)),
+      linear-gradient(to top left,  transparent calc(50% - 0.5px), #eed3d3 50%, transparent calc(50% + 0.5px));
+    background-size: 100% 1px, 1px 100%, 100% 100%, 100% 100%;
+    background-position: center, center, center, center;
+    background-repeat: no-repeat;
+    user-select: none;
+    position: relative;   /* lets the number layer sit exactly on top */
+  }
+  /* The square you're writing in now gets a darker border and a crosshair. */
+  .cell.active { border-color: #a33; box-shadow: 0 0 0 2px #e8c4c4; cursor: crosshair; }
+
+  /* Stroke numbers + arrows, drawn on top of the character.
+     pointer-events: none means the mouse passes through to the drawing area. */
+  .guide { position: absolute; inset: 0; pointer-events: none; }
+  .guide .arrow { stroke: #d33; stroke-width: 1.5; fill: none; }
+  .guide .num   { fill: #d33; font: 600 15px system-ui, sans-serif;
+                  text-anchor: middle; dominant-baseline: central;
+                  /* white edge so a number stays readable on top of a dark stroke */
+                  stroke: #fff; stroke-width: 3px; paint-order: stroke; }
+  .guide g:not(.next) { display: none; }   /* show only the stroke to draw now */
+
+  .reps { color: var(--muted); font-size: .9rem; margin: 6px 0; }
+
+  .status { min-height: 1.4em; color: var(--muted); margin-top: 4px; }
+  .status.wrong { color: var(--wrong); }
+
+  /* Meaning + pinyin, hidden until you've written the word once. */
+  .reveal { min-height: 56px; text-align: center; margin: 6px 0; visibility: hidden; }
+  .reveal.show { visibility: visible; }
+  .reveal .pinyin { font-size: 1.3rem; color: var(--accent); }
+  .reveal .meaning { font-size: 1.05rem; }
+  body.hide-pinyin .pinyin { display: none; }
+
+  /* Level buttons: exactly one is "on" at a time. */
+  .levels { display: flex; gap: 0; margin: 6px 0 12px; }
+  .levels button { border-radius: 0; margin-left: -1px; }
+  .levels button:first-child { border-radius: 6px 0 0 6px; }
+  .levels button:last-child  { border-radius: 0 6px 6px 0; }
+  .levels button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  button {
+    font: inherit; padding: 8px 14px; border-radius: 6px;
+    border: 1px solid #bbb; background: var(--card); cursor: pointer;
+  }
+  button:hover { border-color: var(--ink); }
+  .link { border: none; background: none; color: var(--accent); padding: 0;
+          text-decoration: underline; font-size: .9rem; }
+
+  /* The fully-known list. */
+  .panel { width: min(480px, 100%); margin-top: 20px; background: var(--card);
+           border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; }
+  .panel h2 { font-size: 1rem; margin: 0 0 8px; }
+  .listrow { display: flex; align-items: center; gap: 12px; padding: 6px 0;
+             border-top: 1px solid #eee; }
+  .listrow .hz { font-size: 1.4rem; min-width: 4.5em; }
+  .listrow .info { flex: 1; font-size: .9rem; color: var(--muted); }
+  .listrow button { padding: 4px 10px; font-size: .85rem; }
+
+  /* Section pickers (HSK level + topic). */
+  .sections { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 10px; }
+  select { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid #bbb;
+           background: var(--card); max-width: 100%; }
+  .tags { color: var(--muted); font-size: .85rem; margin-top: 2px; }
+
+  /* ---------- Progress view ---------- */
+  .panel.wide { width: min(760px, 100%); }
+  .bigbar, .smallbar { background: #e6e2db; border-radius: 999px; overflow: hidden; }
+  .bigbar { height: 14px; margin: 6px 0 4px; }
+  .smallbar { height: 6px; width: 90px; flex-shrink: 0; }
+  .bigbar > div, .smallbar > div { height: 100%; background: var(--accent); }
+  .bigtext { color: var(--muted); font-size: .9rem; }
+  .groupby { display: flex; gap: 6px; align-items: center; margin: 10px 0 2px;
+             font-size: .85rem; color: var(--muted); }
+  .groupby button { padding: 3px 10px; font-size: .85rem; }
+  .groupby button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  .group { border: 1px solid #eee; border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
+  .group-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .group-head .name { font-weight: 600; font-size: .95rem; flex: 1; }
+  .group-head .small { color: var(--muted); font-size: .85rem; white-space: nowrap; }
+
+  /* One tile per word, with three pips underneath for its level. */
+  .tiles { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tile { display: flex; flex-direction: column; gap: 3px; padding: 0; border: none;
+          background: none; cursor: pointer; }
+  .tile .hz { padding: 3px 7px; border-radius: 4px; font-size: 1.1rem; text-align: center;
+              background: #f1ede6; border: 1px solid #e0dbd2; min-width: 2.2em; }
+  .tile.lv1 .hz { background: #fbecd0; border-color: #f0d8a8; }
+  .tile.lv2 .hz { background: #d9eedf; border-color: #b9dcc4; }
+  .tile.lv3 .hz { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tile.lv3 { cursor: default; }
+  .tile.current .hz { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .pips { display: flex; gap: 2px; }
+  .pips span { flex: 1; height: 3px; border-radius: 2px; background: #ddd; }
+  .pips span.on { background: var(--accent); }
+
+  /* ---------- Add a word ---------- */
+  .addform { display: flex; gap: 6px; flex-wrap: wrap; }
+  .addform input { font: inherit; padding: 6px 8px; border: 1px solid #bbb; border-radius: 6px;
+                   min-width: 0; flex: 1 1 120px; }
+  .addform #addHanzi { flex: 0 1 110px; font-size: 1.2rem; }
+  .note { color: var(--muted); font-size: .85rem; min-height: 1.3em; margin: 6px 0; }
+  .note.wrong { color: var(--wrong); }
+  #restoreConfirm.confirm, .listrow button.confirm { background: var(--wrong); color: #fff; border-color: var(--wrong); }
+
+  /* ---------- Word list: pick a word by its pinyin ---------- */
+  #wordsPanel { margin: 0 0 12px; }
+  .wl-head { display: flex; align-items: center; gap: 14px; }
+  .wl-head h2 { flex: 1; margin: 0; }
+  /* Hidden: only the header bar stays, so the list is one click away. */
+  #wordsPanel.collapsed .wl-grid, #wordsPanel.collapsed #listHanziBtn { display: none; }
+  /* A grid of cards like a character chart: big hanzi, pinyin, meaning. */
+  .wl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+             gap: 6px; margin-top: 8px; }
+  .wl-item { display: flex; flex-direction: column; align-items: center; gap: 1px;
+             padding: 6px 6px 5px; border-radius: 6px; min-width: 0; }
+  .wl-item .wl-hanzi, .wl-item .wl-q { font-size: 1.9rem; line-height: 1.2; }
+  .wl-item .wl-q { display: none; color: #ccc; }
+  .wl-item .wl-pinyin { font-size: .95rem; color: var(--accent); }
+  .wl-item .wl-meaning { font-size: .72rem; color: var(--muted); max-width: 100%;
+                         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Known words hide their character (shown as ？) so you recall it from the pinyin.
+     "Show hanzi" turns all characters back on. */
+  .wl-item.recall .wl-hanzi { display: none; }
+  .wl-item.recall .wl-q { display: block; }
+  body.list-hanzi .wl-item.recall .wl-hanzi { display: block; }
+  body.list-hanzi .wl-item.recall .wl-q { display: none; }
+  .wl-item .pips { width: 100%; margin-top: 3px; }
+
+  /* HSK level tabs. */
+  .tabs { display: flex; flex-wrap: wrap; justify-content: center; margin-bottom: 8px; }
+  .tabs button { border-radius: 0; margin-left: -1px; padding: 6px 14px; }
+  .tabs button:first-child { border-radius: 6px 0 0 6px; }
+  .tabs button:last-child  { border-radius: 0 6px 6px 0; }
+  .tabs button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .tabs small { opacity: .6; margin-left: 4px; }
+  .wl-item.current { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+  .wl-item.lv3 { opacity: .55; cursor: default; }
+</style>
+</head>
+<body>
+  <h1>Hanzi Writer Practice</h1>
+
+  <!-- Pick which words to practice. Both pickers apply together. -->
+  <!-- HSK level is the main choice; the two pickers below work inside it. -->
+  <div class="tabs" id="levelTabs"></div>
+  <div class="sections">
+    <select id="groupSelect" aria-label="Word type or topic"></select>
+    <!-- Splits the chosen section into small sets of 20 words. -->
+    <select id="setSelect" aria-label="Set"></select>
+  </div>
+
+  <div class="topbar">
+    <span class="badge" id="badge"></span>
+    <span id="count"></span>
+    <button class="link" id="progressBtn">Progress</button>
+    <button class="link" id="listBtn"></button>
+    <button class="link" id="addBtn">Add a word</button>
+    <button class="link" id="backupBtn">Backup</button>
+  </div>
+
+  <div class="panel wide" id="wordsPanel">
+    <div class="wl-head">
+      <h2 id="wordsTitle">Words</h2>
+      <button class="link" id="listHanziBtn">Show known hanzi</button>
+      <button class="link" id="listToggle">Hide ▴</button>
+    </div>
+    <div class="wl-grid" id="wordsGrid"></div>
+  </div>
+
+  <div class="prompt" id="prompt"></div>
+  <div class="reps" id="reps"></div>
+  <div class="row" id="row"></div>
+  <div class="status" id="status"></div>
+
+  <div class="reveal" id="reveal">
+    <div class="pinyin" id="pinyin"></div>
+    <div class="meaning" id="meaning"></div>
+    <div class="tags" id="tags"></div>
+  </div>
+
+  <!-- data-level is read by the JavaScript: 0 New, 1 Kind of known, 2 Known, 3 Fully known -->
+  <div class="levels" id="levels">
+    <button data-level="0">New</button>
+    <button data-level="1">Kind of known</button>
+    <button data-level="2">Known</button>
+    <button data-level="3">Fully known</button>
+  </div>
+
+  <div class="controls">
+    <button id="prevBtn">← Previous</button>
+    <button id="retryBtn">Retry</button>
+    <button id="nextBtn">Next →</button>
+    <button id="pinyinBtn">Hide pinyin</button>
+  </div>
+
+  <div class="panel wide" id="progressPanel" hidden>
+    <h2 id="progressTitle"></h2>
+    <div class="bigbar"><div id="bigFill"></div></div>
+    <div class="bigtext" id="bigText"></div>
+    <div class="groupby">
+      Group by
+      <button data-group="level">HSK level</button>
+      <button data-group="type">Word type</button>
+      <button data-group="topic">Topic</button>
+      <button data-group="set">Set</button>
+    </div>
+    <div id="groups"></div>
+  </div>
+
+  <div class="panel" id="backupPanel" hidden>
+    <h2>Backup and restore</h2>
+    <p class="note">Your progress lives in this browser only. Download a backup to move it
+      to another device (e.g. through Google Drive), or to keep it safe.</p>
+    <div class="addform">
+      <button id="exportBtn">Download backup</button>
+      <!-- A real file picker, hidden; the button below opens it. -->
+      <input type="file" id="importFile" hidden>
+      <button id="importBtn">Restore from file…</button>
+    </div>
+    <div class="note" id="backupNote"></div>
+    <button id="restoreConfirm" hidden></button>
+  </div>
+
+  <div class="panel" id="addPanel" hidden>
+    <h2>Add a word or character</h2>
+    <div class="addform">
+      <input id="addHanzi" placeholder="汉字" maxlength="4" autocomplete="off">
+      <input id="addPinyin" placeholder="pinyin" autocomplete="off">
+      <input id="addMeaning" placeholder="meaning" autocomplete="off">
+      <button id="addSave">Add</button>
+    </div>
+    <div class="note" id="addNote">Type the hanzi. Pinyin and meaning fill in for any HSK word.</div>
+    <div id="customRows"></div>
+  </div>
+
+  <div class="panel" id="listPanel" hidden>
+    <h2>Fully known words</h2>
+    <div id="listRows"></div>
+  </div>
+
+  <!-- 1. The drawing library, 2. stroke data for your characters,
+       3. your word list, 4. your topics. All local files, so no internet is needed. -->
+  <script src="lib/hanzi-writer.min.js"></script>
+  <script src="data/strokes.js"></script>
+  <script src="data/words.js"></script>
+  <script src="data/topics.js"></script>
+
+<script>
+// =====================================================================
+// Saving
+// =====================================================================
+// Everything is saved in the browser's localStorage. Every key starts with
+// "hz_" so it can never collide with your flashcard app's ix_ keys.
+//   hz_levels   -> { "可乐": 2, "咖啡": 3, ... }  (words not listed are New)
+//   hz_settings -> { hidePinyin, current word, chosen section,
+//                    and how the progress view is grouped }
+//   hz_custom   -> words you added with "Add a word"
+//   hz_strokes  -> stroke data downloaded for characters outside the bundle,
+//                  kept so those characters also work offline afterwards
+//
+// try/catch: some browsers (private windows, blocked storage) throw an
+// error when you touch localStorage. Then the app still runs, it just
+// won't remember anything.
+function load(key, fallback) {
+  try {
+    const text = localStorage.getItem(key);
+    return text ? JSON.parse(text) : fallback;
+  } catch { return fallback; }
+}
+function save(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+const levels   = load("hz_levels", {});
+// Object.assign fills in defaults for anything an older save doesn't have yet.
+const settings = Object.assign(
+  { hidePinyin: false, current: null, level: "HSK 1", group: "all", chunk: 0,
+    groupBy: "level", showList: true },
+  load("hz_settings", {})
+);
+const custom = load("hz_custom", []);          // [{ word, pinyin, meaning }, ...]
+const extraStrokes = load("hz_strokes", {});   // { "鹅": {...stroke data...} }
+
+// =====================================================================
+// Levels: how much help each level gets
+// =====================================================================
+const LEVEL_NAMES = ["New", "Kind of known", "Known", "Fully known"];
+const NEW = 0, KIND_OF = 1, KNOWN = 2, FULLY = 3;
+const REPS = 3;   // each word is written 3 times, like a row on the practice sheet
+
+// Returns the help for one rep of a word.
+//   outline:  "full" (trace it), "faint" (barely visible), or "none" (blank grid)
+//   numbers:  show the stroke number + arrow for the next stroke
+//   hintAfter: how many wrong tries before the correct stroke flashes
+function helpFor(level, rep) {
+  if (level === NEW)     return { outline: rep === 0 ? "full" : "none", numbers: true,  hintAfter: 1 };
+  if (level === KIND_OF) return { outline: "faint",                     numbers: false, hintAfter: 3 };
+  return                        { outline: "none",                      numbers: false, hintAfter: 3 };
+}
+
+const OUTLINE_COLOR = { full: "#dddddd", faint: "#f0f0f0" };
+
+function levelOf(word) { return levels[word] ?? NEW; }
+
+// =====================================================================
+// The word list
+// =====================================================================
+// data/words.js has HSK 1-3 plus the words in data/mywords.js. Words you
+// add in the app are stored in the browser (hz_custom) and joined on here,
+// so the rest of the code just uses HZ_WORDS.
+function customToWord(c) {
+  return { word: c.word, pinyin: c.pinyin, meaning: c.meaning,
+           mine: true, custom: true, hsk: c.hsk ?? null, freq: null, types: [] };
+}
+if (window.HZ_WORDS) {
+  const have = new Set(HZ_WORDS.map((w) => w.word));
+  for (const c of custom) if (!have.has(c.word)) HZ_WORDS.push(customToWord(c));
+}
+
+// =====================================================================
+// Sections: HSK level, word type, topic
+// =====================================================================
+// The "level" picker: HSK 1, HSK 2, HSK 3, or My words.
+const SET_NAMES = ["HSK 1", "HSK 2", "HSK 3", "My words"];
+function setOf(w) { return w.mine ? "My words" : "HSK " + w.hsk; }
+
+// Word types come from the HSK data (Verbs, Nouns, ...), see tools/build_data.py.
+const TYPE_NAMES = ["Verbs", "Nouns", "Adjectives", "Adverbs", "Pronouns",
+  "Measure words & numbers", "Time words", "Position words", "Grammar words", "Phrases & idioms"];
+
+// data/topics.js lists the words in each topic as one string with spaces.
+// Here we turn that around into word -> list of topics, so we can quickly
+// ask "which topics is 可乐 in?".
+const TOPICS = window.HZ_TOPICS || {};
+const TOPIC_NAMES = Object.keys(TOPICS);
+const topicsOf = {};
+for (const [name, list] of Object.entries(TOPICS)) {
+  for (const word of list.split(/\s+/)) {
+    if (word) (topicsOf[word] ||= []).push(name);
+  }
+}
+function wordTopics(word) { return topicsOf[word] || []; }
+
+// The second picker holds both kinds of group, so its values say which:
+// "type:Verbs" or "topic:Food & drink".
+function inGroup(w, group) {
+  if (group === "all") return true;
+  const [kind, name] = [group.slice(0, group.indexOf(":")), group.slice(group.indexOf(":") + 1)];
+  return kind === "type" ? w.types.includes(name) : wordTopics(w.word).includes(name);
+}
+
+// Is this word in the section you picked? Both pickers must match.
+function inSection(w) {
+  return (settings.level === "all" || setOf(w) === settings.level) && inGroup(w, settings.group);
+}
+
+// =====================================================================
+// The queue: which words to practice, in which order
+// =====================================================================
+// Order: HSK 1, then 2, then 3, then My words; inside each, the most
+// common words first (freq is a rank: 1 = most common word in Chinese).
+//
+// The chosen section is split into SETS of 20 words, in that order. Fully
+// known words stay in their set (they're just skipped when practicing),
+// so the sets never shift around as you learn.
+const SET_SIZE = 20;
+
+function sectionWords() { return HZ_WORDS.filter(inSection).sort(byOrder); }
+
+// The words in the chosen set ("all" = the whole section).
+function setWords() {
+  const all = sectionWords();
+  if (settings.chunk === "all" || all.length <= SET_SIZE) return all;
+  const last = Math.ceil(all.length / SET_SIZE) - 1;
+  const c = Math.min(settings.chunk, last);
+  return all.slice(c * SET_SIZE, (c + 1) * SET_SIZE);
+}
+
+// The queue: the words you'll actually practice, in order.
+let queue = [];
+function buildQueue() {
+  queue = setWords().filter((w) => levelOf(w.word) !== FULLY);
+}
+function byOrder(a, b) {
+  const set = SET_NAMES.indexOf(setOf(a)) - SET_NAMES.indexOf(setOf(b));
+  if (set !== 0) return set;
+  return (a.freq ?? Infinity) - (b.freq ?? Infinity);   // words without a rank go last
+}
+
+// =====================================================================
+// State for the word on screen
+// =====================================================================
+let qi = 0;          // position in the queue
+let rep = 0;         // which rep (0, 1, 2)
+let charIndex = 0;   // which character inside the word (= which square)
+let writers = [];    // one HanziWriter per square in the row
+let size = 300;      // width of one square; smaller for longer words
+let pad = 20;        // space between the square's edge and the character
+
+const $ = (id) => document.getElementById(id);
+const current = () => queue[qi];
+
+// Run fn after a short pause, but only if you're still on the same word.
+// Without this, pressing Next during a pause would let the old word's
+// timer fire and redraw the old word on top of the new one.
+let wordVisit = 0;   // goes up by 1 every time a word is loaded
+function later(fn, ms) {
+  const visit = wordVisit;
+  setTimeout(() => { if (visit === wordVisit) fn(); }, ms);
+}
+
+// =====================================================================
+// Stroke data: bundled first, internet as a fallback
+// =====================================================================
+const STROKE_CDN = "https://cdn.jsdelivr.net/npm/hanzi-writer-data@2.0.1/";
+
+function loadFromBundle(char, onLoad, onError) {
+  const data = window.HZ_STROKES[char] || extraStrokes[char];
+  if (data) { onLoad(data); return; }
+
+  fetch(STROKE_CDN + encodeURIComponent(char) + ".json")
+    .then((res) => { if (!res.ok) throw new Error("not found"); return res.json(); })
+    .then((json) => {
+      // Keep it, so this character works offline from now on.
+      extraStrokes[char] = json;
+      save("hz_strokes", extraStrokes);
+      onLoad(json);
+    })
+    .catch(() => {
+      setStatus(`No stroke data for ${char}. Connect to the internet or rebuild the data files.`, true);
+      onError(new Error("No stroke data for " + char));
+    });
+}
+
+// =====================================================================
+// Loading a word
+// =====================================================================
+function loadWord(i) {
+  if (queue.length === 0) {
+    wordVisit++;
+    $("row").innerHTML = "";
+    $("reps").textContent = "";
+    $("reveal").classList.remove("show");
+    $("badge").textContent = "";
+    $("badge").className = "badge";
+    $("count").textContent = "0 words to practice";
+    $("prompt").textContent = "Every word here is fully known. Pick another set or section, or bring words back from the Fully known list.";
+    setStatus("");
+    updateListButton();
+    refreshProgress();
+    return;
+  }
+  qi = (i + queue.length) % queue.length;   // wrap around at the ends
+  wordVisit++;                              // cancels any timers from the last word
+  rep = 0;
+  charIndex = 0;
+
+  settings.current = current().word;        // remember where you were
+  save("hz_settings", settings);
+
+  $("reveal").classList.remove("show");
+  $("pinyin").textContent = current().pinyin;
+  $("meaning").textContent = current().meaning;
+  $("tags").textContent = tagLine(current());
+  drawHeader();
+  startRep();
+  refreshProgress();   // move the outline to this word's tile
+}
+
+// "HSK 1 · Verbs · Food & drink" under the meaning.
+function tagLine(w) {
+  const where = w.mine ? "My words" + (w.hsk ? ` (HSK ${w.hsk === 7 ? "7–9" : w.hsk})` : "")
+                       : "HSK " + w.hsk;
+  return [...new Set([where, ...w.types, ...wordTopics(w.word)])].join(" · ");   // Set drops repeats
+}
+
+// Badge, prompt, count, and which level button is "on".
+function drawHeader() {
+  const level = levelOf(current().word);
+  $("badge").textContent = LEVEL_NAMES[level];
+  $("badge").className = "badge lv" + level;
+  $("count").textContent = `Word ${qi + 1} of ${queue.length}`;
+
+  const prompts = [
+    "Trace the character, then write it from memory.",
+    "Write it over the faint outline.",
+    "Write: " + current().meaning,
+  ];
+  $("prompt").textContent = prompts[level];
+
+  document.querySelectorAll("#levels button").forEach((b) => {
+    b.classList.toggle("on", Number(b.dataset.level) === level);
+  });
+  updateListButton();
+}
+
+// =====================================================================
+// Writing the word: one row of squares per rep
+// =====================================================================
+// Each rep builds a fresh row with one square per character, the way you'd
+// write the word across a line of the practice sheet. You write in the
+// first square; when it's done, the next square becomes active, and the
+// finished characters stay visible to its left.
+function startRep() {
+  const word = current().word;
+  const help = helpFor(levelOf(word), rep);
+
+  // Fit the whole word on screen: up to 300px per square, smaller for
+  // longer words or narrow windows.
+  const available = Math.min(document.body.clientWidth - 32, 1000);
+  size = Math.min(300, Math.floor((available - (word.length - 1) * 8) / word.length));
+  pad = Math.round(size * 0.067);   // the same 20px-in-300 margin at any size
+
+  const row = $("row");
+  row.innerHTML = "";
+  writers = [...word].map((char, i) => {
+    const cell = document.createElement("div");
+    cell.className = "cell";
+    cell.id = "cell" + i;
+    cell.style.width = cell.style.height = size + "px";
+    row.appendChild(cell);
+
+    // Every square gets a writer now, so it can show its outline.
+    // Only the active square gets a quiz (see activate below), so you
+    // can't draw in the wrong square.
+    return HanziWriter.create(cell.id, char, {
+      width: size, height: size, padding: pad,
+      showCharacter: false,
+      showOutline: help.outline !== "none",
+      outlineColor: OUTLINE_COLOR[help.outline] || "#dddddd",
+      drawingWidth: Math.round(size * 0.09),   // pen thickness scales with the square
+      showHintAfterMisses: help.hintAfter,
+      highlightOnComplete: true,
+      charDataLoader: loadFromBundle,
+    });
+  });
+
+  charIndex = 0;
+  $("reps").textContent = `Rep ${rep + 1} of ${REPS}`;
+  setStatus(rep === 0 ? "Hold the left mouse button and draw the first stroke." : "");
+  activate(0);
+}
+
+// Make square i the one you're writing in.
+function activate(i) {
+  const word = current().word;
+  const help = helpFor(levelOf(word), rep);
+  document.querySelectorAll("#row .cell").forEach((c, j) => c.classList.toggle("active", j === i));
+  if (i > 0) setStatus("");   // clear the last square's "Stroke 5 of 5"
+
+  // quiz() turns the square into a drawing exercise. Strokes in the wrong
+  // order or wrong shape are rejected, which is how stroke order is checked.
+  writers[i].quiz({
+    onCorrectStroke: (info) => {
+      markGuide(info.strokeNum + 1);
+      setStatus(`Stroke ${info.strokeNum + 1} of ${info.strokeNum + 1 + info.strokesRemaining}`);
+    },
+    onMistake: (info) => {
+      const left = help.hintAfter - info.mistakesOnStroke;
+      setStatus(left > 0
+        ? `Not that stroke. ${left} more ${left === 1 ? "try" : "tries"} before a hint.`
+        : "Not that stroke. Follow the hint.", true);
+    },
+    onComplete: () => {
+      removeGuide();
+      charIndex++;
+      if (charIndex < word.length) {
+        later(() => activate(charIndex), 300);   // move to the next square
+      } else {
+        document.querySelector("#row .cell.active")?.classList.remove("active");
+        finishRep();
+      }
+    },
+  });
+
+  if (help.numbers) drawGuide(word[i], $("cell" + i));
+}
+
+// One full pass through the word is done.
+function finishRep() {
+  rep++;
+  $("reveal").classList.add("show");   // meaning + pinyin after the first pass
+  if (rep < REPS) {
+    setStatus(`Nice. Rep ${rep + 1} of ${REPS} next.`);
+    later(startRep, 1000);             // a moment to look at the finished word
+  } else {
+    setStatus("Done! Press Next for the next word.");
+  }
+}
+
+function setStatus(text, wrong = false) {
+  $("status").textContent = text;
+  $("status").classList.toggle("wrong", wrong);
+}
+
+// =====================================================================
+// Stroke numbers and arrows
+// =====================================================================
+// The stroke data includes a "median" for each stroke: a list of points
+// running down the middle of the stroke, in the direction it is written.
+// Those points use a 1024 x 1024 grid where y points UP. The screen's y
+// points DOWN, so toScreen() flips it.
+function toScreen([x, y]) {
+  const scale = (size - 2 * pad) / 1024;
+  return [pad + x * scale, pad + (900 - y) * scale];
+}
+
+function drawGuide(char, cell) {
+  const data = window.HZ_STROKES[char];
+  if (!data) return;   // downloaded characters get numbers once they've loaded
+
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "guide");
+  svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+  svg.innerHTML = `<defs><marker id="head" viewBox="0 0 10 10" refX="8" refY="5"
+      markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#d33"/></marker></defs>`;
+
+  data.medians.forEach((median, i) => {
+    const pts = median.map(toScreen);
+    const g = document.createElementNS(ns, "g");
+    g.dataset.stroke = i;
+
+    const line = document.createElementNS(ns, "polyline");
+    line.setAttribute("class", "arrow");
+    line.setAttribute("points", pts.map((p) => p.join(",")).join(" "));
+    line.setAttribute("marker-end", "url(#head)");
+    g.appendChild(line);
+
+    // The number sits just BEFORE the start point, so it doesn't cover the stroke.
+    const [x0, y0] = pts[0], [x1, y1] = pts[1];
+    const len = Math.hypot(x1 - x0, y1 - y0) || 1;
+    const num = document.createElementNS(ns, "text");
+    num.setAttribute("class", "num");
+    num.setAttribute("x", clamp(x0 - ((x1 - x0) / len) * 14, 10, size - 10));
+    num.setAttribute("y", clamp(y0 - ((y1 - y0) / len) * 14, 10, size - 10));
+    num.textContent = i + 1;
+    g.appendChild(num);
+
+    svg.appendChild(g);
+  });
+
+  cell.appendChild(svg);
+  markGuide(0);
+}
+
+// A finished square doesn't need its numbers any more.
+function removeGuide() {
+  document.querySelectorAll("#row .guide").forEach((g) => g.remove());
+}
+
+// Only stroke n shows (the CSS rule ".guide g:not(.next)" hides the others).
+function markGuide(n) {
+  document.querySelectorAll(".guide g").forEach((g) => {
+    g.classList.toggle("next", Number(g.dataset.stroke) === n);
+  });
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// =====================================================================
+// Changing a word's level
+// =====================================================================
+function setLevel(word, level) {
+  if (level === NEW) delete levels[word];   // New is the default, so no need to store it
+  else levels[word] = level;
+  save("hz_levels", levels);
+}
+
+document.querySelectorAll("#levels button").forEach((b) => {
+  b.onclick = () => {
+    if (!queue.length) return;
+    const level = Number(b.dataset.level);
+    setLevel(current().word, level);
+    fillSetSelect();
+    if (level === FULLY) {
+      // The word leaves the queue, so the same position now holds the next word.
+      buildQueue();
+      loadWord(qi);
+    } else {
+      loadWord(qi);   // start the word again with the new amount of help
+    }
+    if (!$("listPanel").hidden) drawList();
+  };
+});
+
+// =====================================================================
+// The fully-known list
+// =====================================================================
+function fullyKnownWords() { return HZ_WORDS.filter((w) => levelOf(w.word) === FULLY); }
+
+function updateListButton() {
+  $("listBtn").textContent = `Fully known (${fullyKnownWords().length})`;
+}
+
+function showList(show) {
+  $("listPanel").hidden = !show;
+  if (show) drawList();
+}
+
+function drawList() {
+  const rows = $("listRows");
+  rows.innerHTML = "";
+  const words = fullyKnownWords();
+  if (words.length === 0) {
+    rows.textContent = "None yet. Press “Fully known” on a word to move it here.";
+    return;
+  }
+  words.forEach((w) => {
+    // Built with textContent rather than innerHTML, so quotes or < > in a
+    // meaning can't break the page.
+    const row = document.createElement("div");
+    row.className = "listrow";
+    const hz = document.createElement("span");
+    hz.className = "hz"; hz.textContent = w.word;
+    const info = document.createElement("span");
+    info.className = "info"; info.textContent = `${w.pinyin} · ${w.meaning}`;
+    const back = document.createElement("button");
+    back.textContent = "Bring back";
+    back.onclick = () => bringBack(w.word);
+    row.append(hz, info, back);
+    rows.appendChild(row);
+  });
+}
+
+// A word coming back from the list returns as Known.
+function bringBack(word) {
+  const onScreen = queue.length ? current().word : null;
+  setLevel(word, KNOWN);
+  fillSetSelect();
+  buildQueue();
+  drawList();
+  if (onScreen) {
+    // Keep the same word on screen; its position may have shifted.
+    qi = queue.findIndex((w) => w.word === onScreen);
+    drawHeader();
+    refreshProgress();
+  } else {
+    loadWord(0);   // the queue was empty, so start practicing again
+  }
+}
+
+$("listBtn").onclick = () => showList($("listPanel").hidden);
+
+// =====================================================================
+// Section pickers
+// =====================================================================
+function fillSelects() {
+  const count = (test) => HZ_WORDS.filter(test).length;
+
+  // 1. Level tabs: HSK 1, HSK 2, HSK 3, My words, All — each with its word count.
+  const tabNames = [...SET_NAMES.filter((s) => count((w) => setOf(w) === s)), "all"];
+  if (!tabNames.includes(settings.level)) settings.level = tabNames[0];
+  const tabs = $("levelTabs");
+  tabs.innerHTML = "";
+  for (const s of tabNames) {
+    const b = document.createElement("button");
+    const n = s === "all" ? HZ_WORDS.length : count((w) => setOf(w) === s);
+    b.innerHTML = `<span></span><small>${n}</small>`;
+    b.firstChild.textContent = s === "all" ? "All" : s;
+    b.classList.toggle("on", s === settings.level);
+    b.onclick = () => pickLevel(s);
+    tabs.appendChild(b);
+  }
+
+  // 2. Word type / topic picker. Counts only include the chosen level, so
+  //    HSK 1 shows "Verbs (183)", not all 867 verbs. Empty groups are left out.
+  const inLevel = (w) => settings.level === "all" || setOf(w) === settings.level;
+  const groupSel = $("groupSelect");
+  groupSel.innerHTML = "";
+  groupSel.add(new Option(`All words (${count(inLevel)})`, "all"));
+  // <optgroup> puts the two kinds of group under their own headings.
+  for (const [heading, kind, names] of [["Word types", "type", TYPE_NAMES],
+                                        ["Topics", "topic", TOPIC_NAMES]]) {
+    const og = document.createElement("optgroup");
+    og.label = heading;
+    for (const name of names) {
+      const n = count((w) => inLevel(w) && inGroup(w, `${kind}:${name}`));
+      if (n) og.appendChild(new Option(`${name} (${n})`, `${kind}:${name}`));
+    }
+    if (og.children.length) groupSel.appendChild(og);
+  }
+  // If the saved group has no words at this level, go back to "All words".
+  groupSel.value = settings.group;
+  if (groupSel.value !== settings.group) groupSel.value = "all";
+  settings.group = groupSel.value;
+}
+
+// The set picker. Each option shows a few pinyin from the set and how much
+// of it is fully known, e.g. "Set 1 · wǒ, nǐ, tā… · 25%".
+function fillSetSelect() {
+  const all = sectionWords();
+  const sel = $("setSelect");
+  sel.hidden = all.length <= SET_SIZE;   // one small section needs no sets
+  sel.innerHTML = "";
+  sel.add(new Option(`All ${all.length} words`, "all"));
+  for (let c = 0; c * SET_SIZE < all.length; c++) {
+    const words = all.slice(c * SET_SIZE, (c + 1) * SET_SIZE);
+    const sample = words.slice(0, 3).map((w) => w.pinyin).join(", ");
+    const pct = percent(fullyCount(words), words.length);
+    sel.add(new Option(`Set ${c + 1} · ${sample}… · ${pct}%`, String(c)));
+  }
+  sel.value = String(settings.chunk);
+  if (sel.value === "") { sel.value = "0"; settings.chunk = 0; }
+}
+
+// A new level or group starts at its first set.
+function pickLevel(level) {
+  if (level === settings.level) return;
+  settings.level = level;
+  settings.chunk = 0;
+  fillSelects();   // redo the counts for the new level
+  applySection();
+}
+$("groupSelect").onchange = () => {
+  settings.group = $("groupSelect").value;
+  settings.chunk = 0;
+  applySection();
+};
+
+function applySection() {
+  save("hz_settings", settings);
+  fillSetSelect();
+  // Stay on the same word if it's still in the queue, otherwise start at the top.
+  const keep = queue.length ? current().word : null;
+  buildQueue();
+  const i = queue.findIndex((w) => w.word === keep);
+  loadWord(i >= 0 ? i : 0);
+}
+$("setSelect").onchange = () => {
+  const v = $("setSelect").value;
+  settings.chunk = v === "all" ? "all" : Number(v);
+  save("hz_settings", settings);
+  buildQueue();
+  loadWord(0);
+};
+
+// Jump to any word in the section, switching to its set if needed.
+function goToWord(word) {
+  if (settings.chunk !== "all") {
+    const idx = sectionWords().findIndex((w) => w.word === word);
+    if (idx < 0) return;
+    settings.chunk = Math.floor(idx / SET_SIZE);
+    save("hz_settings", settings);
+    fillSetSelect();
+    buildQueue();
+  }
+  const i = queue.findIndex((w) => w.word === word);
+  if (i >= 0) { loadWord(i); window.scrollTo({ top: 0, behavior: "smooth" }); }
+}
+
+// =====================================================================
+// Word list: choose a word by its pinyin
+// =====================================================================
+// Shows the words of the current set as cards: character, pinyin, meaning.
+// Click one to write it now. Words you've marked Known show ？ instead of
+// the character, so you have to recall it from the pinyin.
+function refreshWords() {
+  drawWords();
+}
+
+// Hide / Show: folds the list down to its header bar (remembered between visits).
+function applyListShown() {
+  $("wordsPanel").classList.toggle("collapsed", !settings.showList);
+  $("listToggle").textContent = settings.showList ? "Hide ▴" : "Show ▾";
+}
+
+function drawWords() {
+  const words = setWords();
+  const setName = settings.chunk === "all" || $("setSelect").hidden ? "" : ` · Set ${settings.chunk + 1}`;
+  $("wordsTitle").textContent = `Words${setName} (${words.length})`;
+  const grid = $("wordsGrid");
+  grid.innerHTML = "";
+  const onScreen = queue.length ? current().word : null;
+  for (const w of words) {
+    const level = levelOf(w.word);
+    const item = document.createElement("button");
+    item.className = `wl-item lv${level}` + (w.word === onScreen ? " current" : "") +
+                     (level === KNOWN ? " recall" : "");
+    item.innerHTML = `<span class="wl-hanzi"></span><span class="wl-q">？</span>
+      <span class="wl-pinyin"></span><span class="wl-meaning"></span>
+      <span class="pips"><span></span><span></span><span></span></span>`;
+    item.querySelector(".wl-pinyin").textContent = w.pinyin;
+    item.querySelector(".wl-meaning").textContent = w.meaning;
+    item.querySelector(".wl-meaning").title = w.meaning;   // full meaning on hover
+    item.querySelector(".wl-hanzi").textContent = w.word;
+    item.querySelectorAll(".pips span").forEach((p, i) => p.classList.toggle("on", i < level));
+    if (level === FULLY) item.title = "Fully known. Bring it back from the Fully known list to practice it.";
+    else item.onclick = () => goToWord(w.word);
+    grid.appendChild(item);
+  }
+}
+
+$("listToggle").onclick = () => {
+  settings.showList = !settings.showList;
+  save("hz_settings", settings);
+  applyListShown();
+};
+$("listHanziBtn").onclick = () => {
+  const on = document.body.classList.toggle("list-hanzi");
+  $("listHanziBtn").textContent = on ? "Hide known hanzi" : "Show known hanzi";
+};
+
+// =====================================================================
+// Progress view
+// =====================================================================
+// A big bar for the whole section, then one card per topic (or HSK level)
+// with a tile for each word. The three pips under a tile show its level:
+// none = New, 1 = Kind of known, 2 = Known, 3 = Fully known.
+function refreshProgress() {
+  refreshWords();
+  if (!$("progressPanel").hidden) drawProgress();
+}
+
+function percent(part, whole) { return whole ? Math.round((part / whole) * 100) : 0; }
+function fullyCount(words) { return words.filter((w) => levelOf(w.word) === FULLY).length; }
+
+function drawProgress() {
+  const words = HZ_WORDS.filter(inSection);
+  const done = fullyCount(words);
+  const levelName = settings.level === "all" ? "All levels" : settings.level;
+  const groupName = settings.group === "all" ? "All words" : settings.group.split(":")[1];
+  $("progressTitle").textContent = `Progress: ${levelName} · ${groupName}`;
+  $("bigFill").style.width = percent(done, words.length) + "%";
+  $("bigText").textContent =
+    `${done} / ${words.length} fully known (${percent(done, words.length)}%)`;
+
+  document.querySelectorAll(".groupby button").forEach((b) =>
+    b.classList.toggle("on", b.dataset.group === settings.groupBy));
+
+  // Which groups to show, and which words are in each.
+  // Words with no type or no topic are collected in a last "Other" card.
+  let groups;
+  if (settings.groupBy === "type") {
+    groups = TYPE_NAMES.map((t) => [t, words.filter((w) => w.types.includes(t))]);
+    groups.push(["Other", words.filter((w) => !w.types.length)]);
+  } else if (settings.groupBy === "topic") {
+    groups = TOPIC_NAMES.map((t) => [t, words.filter((w) => wordTopics(w.word).includes(t))]);
+    groups.push(["No topic yet", words.filter((w) => !wordTopics(w.word).length)]);
+  } else {
+    groups = SET_NAMES.map((s) => [s, words.filter((w) => setOf(w) === s)]);
+  }
+  if (settings.groupBy === "set") {
+    // The same sets of 20 as the set picker, in learning order.
+    const all = [...words].sort(byOrder);
+    groups = [];
+    for (let c = 0; c * SET_SIZE < all.length; c++) {
+      groups.push([`Set ${c + 1}`, all.slice(c * SET_SIZE, (c + 1) * SET_SIZE)]);
+    }
+  }
+
+  const box = $("groups");
+  box.innerHTML = "";
+  const onScreen = queue.length ? current().word : null;
+  for (const [name, list] of groups) {
+    if (!list.length) continue;
+    const n = fullyCount(list);
+
+    const group = document.createElement("div");
+    group.className = "group";
+    group.innerHTML = `<div class="group-head"><span class="name"></span>
+      <span class="smallbar"><div></div></span><span class="small"></span></div>
+      <div class="tiles"></div>`;
+    group.querySelector(".name").textContent = name;
+    group.querySelector(".smallbar div").style.width = percent(n, list.length) + "%";
+    group.querySelector(".small").textContent = `${n}/${list.length} · ${percent(n, list.length)}%`;
+
+    const tiles = group.querySelector(".tiles");
+    for (const w of [...list].sort(byOrder)) {   // same order you practice them in
+      const level = levelOf(w.word);
+      const tile = document.createElement("button");
+      tile.className = `tile lv${level}` + (w.word === onScreen ? " current" : "");
+      tile.title = `${w.pinyin} · ${w.meaning} · ${LEVEL_NAMES[level]}`;   // shows on hover
+      tile.innerHTML = `<span class="hz"></span>
+        <span class="pips"><span></span><span></span><span></span></span>`;
+      tile.querySelector(".hz").textContent = w.word;
+      tile.querySelectorAll(".pips span").forEach((p, i) => p.classList.toggle("on", i < level));
+      // Click a tile to practice that word now (fully known words aren't in the queue).
+      if (level !== FULLY) {
+        tile.onclick = () => goToWord(w.word);
+      }
+      tiles.appendChild(tile);
+    }
+    box.appendChild(group);
+  }
+}
+
+$("progressBtn").onclick = () => {
+  $("progressPanel").hidden = !$("progressPanel").hidden;
+  refreshProgress();
+};
+document.querySelectorAll(".groupby button").forEach((b) => {
+  b.onclick = () => {
+    settings.groupBy = b.dataset.group;
+    save("hz_settings", settings);
+    drawProgress();
+  };
+});
+
+// =====================================================================
+// Add a word
+// =====================================================================
+// The full HSK dictionary (data/dict.js, ~0.7 MB) is only loaded when you
+// open this form, so normal practice starts faster. Loading a script later
+// works the same as a <script> tag in the page.
+function loadDict() {
+  return new Promise((resolve) => {
+    if (window.HZ_DICT) return resolve();
+    const s = document.createElement("script");
+    s.src = "data/dict.js";
+    s.onload = resolve;
+    s.onerror = resolve;   // without it the form still works; you just type everything
+    document.head.appendChild(s);
+  });
+}
+
+function setNote(text, wrong = false) {
+  $("addNote").textContent = text;
+  $("addNote").classList.toggle("wrong", wrong);
+}
+
+// As you type the hanzi, fill in pinyin and meaning if the dictionary knows it.
+$("addHanzi").oninput = () => {
+  const word = $("addHanzi").value.trim();
+  const known = HZ_WORDS.find((w) => w.word === word);
+  if (known) {
+    setNote(`${word} is already in ${known.mine ? "My words" : "HSK " + known.hsk}.`);
+    return;
+  }
+  const entry = window.HZ_DICT && HZ_DICT[word];
+  if (entry) {
+    $("addPinyin").value = entry[0];
+    $("addMeaning").value = entry[1];
+    setNote(`Found in the HSK ${entry[2] === 7 ? "7–9" : entry[2]} list. Edit anything you like, then Add.`);
+  } else {
+    setNote(word ? "Not in the HSK lists. Type the pinyin and meaning yourself." : "");
+  }
+};
+
+$("addSave").onclick = () => {
+  const word = $("addHanzi").value.trim();
+  const pinyin = $("addPinyin").value.trim();
+  const meaning = $("addMeaning").value.trim();
+  if (!/^[一-鿿]{1,4}$/.test(word)) return setNote("Use 1 to 4 Chinese characters.", true);
+  if (!meaning) return setNote("Add a meaning, so the word can be shown after you write it.", true);
+  if (HZ_WORDS.some((w) => w.word === word)) return setNote(`${word} is already in your list.`, true);
+
+  const entry = window.HZ_DICT && HZ_DICT[word];
+  const c = { word, pinyin, meaning, hsk: entry ? entry[2] : null };
+  custom.push(c);
+  save("hz_custom", custom);
+  HZ_WORDS.push(customToWord(c));
+
+  $("addHanzi").value = $("addPinyin").value = $("addMeaning").value = "";
+  setNote(`Added ${word} to My words. Characters outside HSK 1–3 need the internet the first time you write them.`);
+  fillSelects();
+  fillSetSelect();
+  buildQueue();
+  drawCustomList();
+  refreshProgress();
+};
+
+// Words you added, each with a Remove button that needs two clicks:
+// the first click turns it red ("Sure?"), a second click within 3 seconds removes.
+// (Browser confirm() pop-ups get blocked, so the confirmation lives in the page.)
+function drawCustomList() {
+  const rows = $("customRows");
+  rows.innerHTML = "";
+  for (const c of custom) {
+    const row = document.createElement("div");
+    row.className = "listrow";
+    const hz = document.createElement("span");
+    hz.className = "hz"; hz.textContent = c.word;
+    const info = document.createElement("span");
+    info.className = "info"; info.textContent = `${c.pinyin} · ${c.meaning}`;
+    const del = document.createElement("button");
+    del.textContent = "Remove";
+    let armed = null;
+    del.onclick = () => {
+      if (!armed) {
+        del.textContent = "Sure?";
+        del.classList.add("confirm");
+        armed = setTimeout(() => { armed = null; del.textContent = "Remove"; del.classList.remove("confirm"); }, 3000);
+        return;
+      }
+      clearTimeout(armed);
+      removeCustom(c.word);
+    };
+    row.append(hz, info, del);
+    rows.appendChild(row);
+  }
+}
+
+function removeCustom(word) {
+  custom.splice(custom.findIndex((c) => c.word === word), 1);
+  save("hz_custom", custom);
+  HZ_WORDS.splice(HZ_WORDS.findIndex((w) => w.word === word && w.custom), 1);
+  const onScreen = queue.length ? current().word : null;
+  fillSelects();
+  fillSetSelect();
+  buildQueue();
+  drawCustomList();
+  if (onScreen === word) {
+    loadWord(qi);   // the word you were writing is gone, so move on
+  } else {
+    qi = Math.max(0, queue.findIndex((w) => w.word === onScreen));
+    if (queue.length) drawHeader();
+    refreshProgress();
+  }
+}
+
+$("addBtn").onclick = () => {
+  $("addPanel").hidden = !$("addPanel").hidden;
+  if (!$("addPanel").hidden) {
+    drawCustomList();
+    loadDict();
+    $("addHanzi").focus();
+  }
+};
+
+// =====================================================================
+// Backup and restore
+// =====================================================================
+// A backup is one .json file with everything this app saves (only the hz_
+// keys, never your flashcard app's ix_ keys).
+const BACKUP_KEYS = ["hz_levels", "hz_settings", "hz_custom", "hz_strokes"];
+
+function setBackupNote(text, wrong = false) {
+  $("backupNote").textContent = text;
+  $("backupNote").classList.toggle("wrong", wrong);
+}
+
+$("exportBtn").onclick = () => {
+  const backup = { app: "hanzi-writer", version: 1, exportedAt: new Date().toISOString(), data: {} };
+  for (const key of BACKUP_KEYS) backup.data[key] = load(key, null);
+
+  // Turn the text into a file and "click" a hidden download link for it.
+  const blob = new Blob([JSON.stringify(backup, null, 1)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `hanzi-writer-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  const n = Object.keys(levels).length;
+  setBackupNote(`Downloaded ${a.download} (${n} words with a level, ${custom.length} added words).`);
+};
+
+// Restoring replaces your current progress, so it takes two clicks:
+// pick a file, check the summary, then press the red "Replace my progress" button.
+let pendingRestore = null;
+$("importBtn").onclick = () => $("importFile").click();
+$("importFile").onchange = () => {
+  const file = $("importFile").files[0];
+  $("importFile").value = "";   // so choosing the same file again still triggers this
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const backup = JSON.parse(reader.result);
+      if (backup.app !== "hanzi-writer" || !backup.data) throw new Error("not ours");
+      pendingRestore = backup;
+      const n = Object.keys(backup.data.hz_levels || {}).length;
+      const c = (backup.data.hz_custom || []).length;
+      const when = (backup.exportedAt || "").slice(0, 10) || "an unknown date";
+      setBackupNote(`Backup from ${when}: ${n} words with a level, ${c} added words. ` +
+                    "Restoring replaces your current progress in this browser.");
+      $("restoreConfirm").textContent = "Replace my progress";
+      $("restoreConfirm").className = "confirm";
+      $("restoreConfirm").hidden = false;
+    } catch {
+      pendingRestore = null;
+      $("restoreConfirm").hidden = true;
+      setBackupNote("That file isn't a Hanzi Writer backup.", true);
+    }
+  };
+  reader.readAsText(file);
+};
+
+$("restoreConfirm").onclick = () => {
+  if (!pendingRestore) return;
+  for (const key of BACKUP_KEYS) {
+    const value = pendingRestore.data[key];
+    try {
+      if (value == null) localStorage.removeItem(key);
+      else localStorage.setItem(key, JSON.stringify(value));
+    } catch {}
+  }
+  location.reload();   // start fresh with the restored progress
+};
+
+$("backupBtn").onclick = () => {
+  $("backupPanel").hidden = !$("backupPanel").hidden;
+  setBackupNote("");
+  $("restoreConfirm").hidden = true;
+  pendingRestore = null;
+};
+
+// =====================================================================
+// Other buttons
+// =====================================================================
+$("prevBtn").onclick  = () => queue.length && loadWord(qi - 1);
+$("nextBtn").onclick  = () => queue.length && loadWord(qi + 1);
+$("retryBtn").onclick = () => queue.length && loadWord(qi);
+
+function applyPinyinSetting() {
+  document.body.classList.toggle("hide-pinyin", settings.hidePinyin);
+  $("pinyinBtn").textContent = settings.hidePinyin ? "Show pinyin" : "Hide pinyin";
+}
+$("pinyinBtn").onclick = () => {
+  settings.hidePinyin = !settings.hidePinyin;
+  save("hz_settings", settings);
+  applyPinyinSetting();
+};
+
+// =====================================================================
+// Start
+// =====================================================================
+// If any of the three <script> files failed to load, say which one
+// instead of showing an empty box.
+const missingFiles = [];
+if (!window.HanziWriter) missingFiles.push("lib/hanzi-writer.min.js");
+if (!window.HZ_STROKES)  missingFiles.push("data/strokes.js");
+if (!window.HZ_WORDS)    missingFiles.push("data/words.js");
+
+if (missingFiles.length) {
+  setStatus("Couldn't load " + missingFiles.join(", ") +
+    ". Extract the whole zip folder, then open index.html from there.", true);
+} else {
+  applyPinyinSetting();
+  fillSelects();
+  fillSetSelect();
+  applyListShown();
+  buildQueue();
+  // Pick up where you left off, or start at the top.
+  const saved = queue.findIndex((w) => w.word === settings.current);
+  loadWord(saved >= 0 ? saved : 0);
+}
+
+// Offline: sw.js keeps a copy of the app on this device so it opens with no
+// internet. Service workers only run on a real website (https), not when the
+// file is opened straight from disk, so this is skipped there.
+if ("serviceWorker" in navigator &&
+    (location.protocol === "https:" || location.hostname === "localhost")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+// Ask the browser to keep this site's saved progress even when the device is
+// low on space or the site hasn't been opened for a while. Browsers decide on
+// their own (installed / often-used sites usually get a yes); if they say no,
+// everything still saves as normal, just without that extra protection.
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist().catch(() => {});
+}
+</script>
+</body>
+</html>
